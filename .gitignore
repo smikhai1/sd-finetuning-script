@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.sh
+**/.DS_store
+generate_captions.py
+convert_png_to_jpg.py
+.idea
