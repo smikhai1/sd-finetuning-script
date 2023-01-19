@@ -266,7 +266,7 @@ def parse_args():
         args.local_rank = env_local_rank
 
     # Sanity checks
-    if args.dataset_name is None and args.train_data_dir is None:
+    if args.train_data_dir is None:
         raise ValueError("Need either a dataset name or a training folder.")
 
     # default to using the same revision for the non-ema model if not specified
@@ -570,7 +570,7 @@ def main():
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
+        input_ids = torch.stack([example["input_ids"][0] for example in examples])
         return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     # DataLoaders creation:
