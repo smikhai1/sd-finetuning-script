@@ -262,6 +262,7 @@ def parse_args():
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
 
+    # img2img settings
     parser.add_argument("--val_every", type=int, default=None,
                         help="Freqeuncy of img2img validation steps")
     parser.add_argument("--val_imgs_dp", type=str, default=None,
@@ -270,7 +271,9 @@ def parse_args():
                         help="Text prompts for validation; different prompts should be separated with [SEP]")
     parser.add_argument("--val_neg_prompts", type=str, default=None,
                         help="Negative prompts for validation; different prompts should be separated with [SEP]")
-
+    parser.add_argument('--i2i_num_steps', type=int, default=100)
+    parser.add_argument('--i2i_guidance_scale', type=float, default=8.5)
+    parser.add_argument('--i2i_strength', type=float, default=0.45)
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -695,8 +698,9 @@ def main():
                 neg_prompts = args.val_neg_prompts.split('[SEP]') if args.val_neg_prompts is not None else None
                 run_img2img_inference(img2img_pipeline, args.val_imgs_dp, prompts, neg_prompts,
                                       seed=11121994, save_root_dir=val_save_dir, num_imgs_in_row=3,
-                                      num_inference_steps=100,
-                                      guidance_scale=8.5, num_images_per_prompt=5, strength=0.5, init_img_size=512)
+                                      num_inference_steps=args.i2i_num_steps,
+                                      guidance_scale=args.i2i_guidance_scale, num_images_per_prompt=5,
+                                      strength=args.i2i_strength, init_img_size=512)
                 unet.train(), vae.train(), text_encoder.train()
 
             # Skip steps until we reach the resumed step
