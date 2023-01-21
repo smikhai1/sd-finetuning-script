@@ -38,8 +38,8 @@ import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from datasets import load_dataset
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
+
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
@@ -47,6 +47,8 @@ from huggingface_hub import HfFolder, Repository, whoami
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
+
+from inference_utils import make_img2img_pipeline, run_img2img_inference, load_images
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -259,6 +261,16 @@ def parse_args():
     parser.add_argument(
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
+
+    parser.add_argument("--val_every", type=int, default=None,
+                        help="Freqeuncy of img2img validation steps")
+    parser.add_argument("--val_imgs_dp", type=str, default=None,
+                        help="Path to directory with test images")
+    parser.add_argument("--val_prompts", type=str, default=None,
+                        help="Text prompts for validation; different prompts should be separated with [SEP]")
+    parser.add_argument("--val_neg_prompts", type=str, default=None,
+                        help="Negative prompts for validation; different prompts should be separated with [SEP]")
+
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -625,6 +637,14 @@ def main():
     if accelerator.is_main_process:
         accelerator.init_trackers("text2image-fine-tune", config=vars(args))
 
+    # set validation
+    if args.val_every is not None and args.val_every > 0:
+        img2img_pipeline = make_img2img_pipeline(text_encoder, vae, unet, args.pretrained_model_name_or_path,
+                                                 args.revision, device=accelerator.device, dtype=weight_dtype)
+        validation_active = True
+    else:
+        validation_active = False
+
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -663,6 +683,22 @@ def main():
         unet.train()
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
+            if accelerator.is_main_process and validation_active and global_step % args.val_every == 0:  # run validation
+                img2img_pipeline.text_encoder = text_encoder.eval()
+                img2img_pipeline.vae = vae.eval()
+                if args.use_ema:
+                    img2img_pipeline.unet = unet.eval()  # ema_unet !!!!
+                else:
+                    img2img_pipeline.unet = unet.eval()
+                val_save_dir = osp.join(args.output_dir, 'img2img_results', f'iteration-{global_step:6>0}')
+                prompts = args.val_prompts.split('[SEP]')
+                neg_prompts = args.val_neg_prompts.split('[SEP]') if args.val_neg_prompts is not None else None
+                run_img2img_inference(img2img_pipeline, args.val_imgs_dp, prompts, neg_prompts,
+                                      seed=11121994, save_root_dir=val_save_dir, num_imgs_in_row=3,
+                                      num_inference_steps=100,
+                                      guidance_scale=8.5, num_images_per_prompt=5, strength=0.5, init_img_size=512)
+                unet.train(), vae.train(), text_encoder.train()
+
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
