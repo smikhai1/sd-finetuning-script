@@ -57,7 +57,7 @@ check_min_version("0.10.0.dev0")
 logger = get_logger(__name__, log_level="INFO")
 
 
-def parse_args():
+def parse_args(namespace=None):
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
@@ -275,7 +275,7 @@ def parse_args():
     parser.add_argument('--i2i_guidance_scale', type=float, default=8.5)
     parser.add_argument('--i2i_strength', type=float, default=0.45)
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=namespace)
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
@@ -442,8 +442,7 @@ class ImageCaptionDataset(Dataset):
         return {'pixel_values': img, 'input_ids': input_ids}
 
 
-def main():
-    args = parse_args()
+def main(args):
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
 
     accelerator = Accelerator(
@@ -796,4 +795,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)
+
