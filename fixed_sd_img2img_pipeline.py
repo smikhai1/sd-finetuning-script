@@ -546,6 +546,7 @@ class StableDiffusionImg2ImgPipeline(DiffusionPipeline):
         text_embeddings = self._encode_prompt(
             prompt, device, num_images_per_prompt, do_classifier_free_guidance, negative_prompt
         )
+        text_embeddings = text_embeddings.to(dtype=torch.float16)
 
         # 4. Preprocess image
         image = preprocess(image)
