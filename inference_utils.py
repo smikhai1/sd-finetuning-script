@@ -1,14 +1,12 @@
 import os
 import os.path as osp
 
-from diffusers import EulerAncestralDiscreteScheduler
+from diffusers import EulerAncestralDiscreteScheduler, StableDiffusionImg2ImgPipeline
 import numpy as np
 from PIL import Image
 import torch
 from torchvision.utils import make_grid
 from tqdm import tqdm
-
-from fixed_sd_img2img_pipeline import StableDiffusionImg2ImgPipeline
 
 
 @torch.no_grad()
@@ -28,19 +26,19 @@ def run_img2img_inference(pipeline, init_images_dp, prompts, neg_prompts, seed, 
 
     generator = torch.Generator(device="cuda").manual_seed(seed)
 
-    for init_image, img_name in tqdm(init_images_w_names, desc='Running img2img SD pipeline ...'):
+    for image, img_name in tqdm(init_images_w_names, desc='Running img2img SD pipeline ...'):
         for p_idx, prompt in enumerate(prompts):
             save_dir = osp.join(save_root_dir, prompt)
             os.makedirs(save_dir, exist_ok=True)
 
             neg_prompt = neg_prompts[p_idx]
-            results = pipeline(prompt=prompt, init_image=init_image, generator=generator,
+            results = pipeline(prompt=prompt, image=image, generator=generator,
                                negative_prompt=neg_prompt, num_inference_steps=num_inference_steps,
                                guidance_scale=guidance_scale, num_images_per_prompt=num_images_per_prompt,
                                strength=strength).images
 
             grid = [torch.from_numpy(np.array(img)).permute(2, 0, 1) for img in results]
-            grid.insert(0, torch.from_numpy(np.array(init_image)).permute(2, 0, 1))
+            grid.insert(0, torch.from_numpy(np.array(image)).permute(2, 0, 1))
             grid = make_grid(grid, nrow=num_imgs_in_row)
             grid = grid.permute(1, 2, 0).numpy()
 
