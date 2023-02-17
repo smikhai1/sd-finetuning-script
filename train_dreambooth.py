@@ -30,7 +30,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-from inference_utils import make_img2img_pipeline, run_img2img_inference
+from inference_utils import run_img2img_inference
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.12.0")
@@ -327,6 +327,10 @@ def parse_args(input_args=None):
     parser.add_argument('--i2i_num_steps', type=int, default=100)
     parser.add_argument('--i2i_guidance_scale', type=float, default=8.5)
     parser.add_argument('--i2i_strength', type=float, default=0.45)
+    parser.add_argument('--i2i_seed', type=int, default=42,
+                        help='To make I2I results reproducible')
+    parser.add_argument('--i2i_size', type=int, default=512,
+                        help='Defines the size to which the longest side of init image will be rescaled to')
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -703,16 +707,7 @@ def main(args):
         weight_dtype = torch.bfloat16
 
     # set validation
-    if args.val_every is not None and args.val_every > 0:
-        img2img_pipeline = make_img2img_pipeline(text_encoder,
-                                                 vae,
-                                                 unet,
-                                                 args.pretrained_model_name_or_path,
-                                                 args.revision, device=accelerator.device,
-                                                 dtype=weight_dtype)
-        validation_active = True
-    else:
-        validation_active = False
+    validation_active = args.val_every is not None and args.val_every > 0
 
     # Prepare everything with our `accelerator`.
     if args.train_text_encoder:
@@ -807,21 +802,17 @@ def main(args):
 
         for step, batch in enumerate(train_dataloader):
             if accelerator.is_main_process and validation_active and global_step % args.val_every == 0:  # run validation
-                img2img_pipeline.text_encoder = accelerator.unwrap_model(text_encoder.eval(), keep_fp32_wrapper=False)#.to(dtype=weight_dtype)
-                img2img_pipeline.vae = accelerator.unwrap_model(vae.eval(), keep_fp32_wrapper=False)#.to(dtype=weight_dtype)
-                img2img_pipeline.unet = accelerator.unwrap_model(unet.eval(), keep_fp32_wrapper=True)#.to(dtype=weight_dtype)
-
                 val_save_dir = osp.join(args.output_dir, 'img2img_results', f'iteration-{global_step:6>0}')
                 prompts = args.val_prompts.split('[SEP]')
                 neg_prompts = args.val_neg_prompts.split('[SEP]') if args.val_neg_prompts is not None else None
-                run_img2img_inference(img2img_pipeline, args.val_imgs_dp, prompts, neg_prompts,
-                                      seed=11121994, save_root_dir=val_save_dir, num_imgs_in_row=3,
-                                      num_inference_steps=args.i2i_num_steps,
-                                      guidance_scale=args.i2i_guidance_scale, num_images_per_prompt=5,
-                                      strength=args.i2i_strength, init_img_size=512)
-                unet, vae, text_encoder = accelerator.prepare(unet.train(), vae.train(), text_encoder.train())
-                text_encoder = text_encoder.to(dtype=weight_dtype)
-                vae = vae.to(dtype=weight_dtype)
+                text_encoder, vae, unet = run_img2img_inference(accelerator, args, vae, unet, text_encoder, weight_dtype,
+                                                                args.val_imgs_dp, prompts, neg_prompts,
+                                                                seed=args.i2i_seed, save_root_dir=val_save_dir,
+                                                                num_imgs_in_row=3,
+                                                                num_inference_steps=args.i2i_num_steps,
+                                                                guidance_scale=args.i2i_guidance_scale,
+                                                                num_images_per_prompt=2,
+                                                                strength=args.i2i_strength, init_img_size=args.i2i_size)
 
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:

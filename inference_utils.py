@@ -10,9 +10,25 @@ from tqdm import tqdm
 
 
 @torch.no_grad()
-def run_img2img_inference(pipeline, init_images_dp, prompts, neg_prompts, seed, save_root_dir,
+def run_img2img_inference(accelerator, args, vae, unet, text_encoder, dtype,
+                          init_images_dp, prompts, neg_prompts, seed, save_root_dir,
                           num_imgs_in_row=3, num_inference_steps=100, guidance_scale=8.5,
                           num_images_per_prompt=5, strength=0.5, init_img_size=512):
+
+    vae = accelerator.unwrap_model(vae, keep_fp32_wrapper=False).to(dtype=dtype)
+    if args.train_text_encoder:
+        text_encoder = accelerator.unwrap_model(text_encoder, keep_fp32_wrapper=False).to(dtype=dtype)
+
+    unet = accelerator.unwrap_model(unet, keep_fp32_wrapper=False)
+    unet = unet.to(dtype=dtype)
+
+    pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(args.pretrained_model_name_or_path,
+                                                              text_encoder=text_encoder,
+                                                              vae=vae,
+                                                              unet=unet,
+                                                              revision=args.revision,
+                                                              torch_dtype=dtype)
+    pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config)
 
     init_images_w_names = load_images(init_images_dp, size=init_img_size)
 
@@ -45,25 +61,37 @@ def run_img2img_inference(pipeline, init_images_dp, prompts, neg_prompts, seed, 
             save_fp = osp.join(save_dir, osp.splitext(img_name)[0] + '.jpg')
             Image.fromarray(grid).save(save_fp, quality=70)
 
+    del pipeline
+    torch.cuda.empty_cache()
 
-def make_img2img_pipeline(text_encoder, vae, unet, model_name, revision,
-                          device='cuda', dtype=torch.float16):
-    pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(model_name,
-                                                              text_encoder=text_encoder,
-                                                              vae=vae,
-                                                              unet=unet,
-                                                              revision=revision,
-                                                              torch_dtype=dtype)
-    pipeline = pipeline.to(device)
-    pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config)
-    return pipeline
+    # wrap all models back
+    vae, unet = accelerator.prepare(vae, unet)
+    if args.train_text_encoder:
+        text_encoder = accelerator.prepare(text_encoder)
+
+    unet.to(dtype=torch.float32).train()
+    vae.to(accelerator.device, dtype=dtype)
+    if not args.train_text_encoder:
+        text_encoder.to(accelerator.device, dtype=dtype)
+    else:
+        text_encoder.to(accelerator.device, dtype=torch.float32)
+        text_encoder.train()
+
+    return text_encoder, vae, unet
 
 
 def resize_image(image, size):
-    if not isinstance(size, (tuple, list)):
-        size = (size, size)
-    h, w = size
-    image = image.resize((w, h), resample=Image.LANCZOS)
+    w, h = image.size
+    scale = size / (max(w, h))
+    if h >= w:
+        new_w = int(scale * w)
+        new_h = size
+    else:
+        new_w = size
+        new_h = int(scale * h)
+    new_h -= new_h % 32
+    new_w -= new_w % 32
+    image = image.resize((new_w, new_h), resample=Image.LANCZOS)
     return image
 
 
