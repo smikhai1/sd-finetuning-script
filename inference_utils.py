@@ -37,6 +37,8 @@ def run_img2img_inference(accelerator, args, vae, unet, text_encoder, dtype,
 
     if not isinstance(neg_prompts, (list, tuple)):
         neg_prompts = [neg_prompts] * len(prompts)
+    elif len(neg_prompts) == 1 and len(prompts) != 1:
+        neg_prompts = neg_prompts * len(prompts)
 
     assert len(prompts) == len(neg_prompts)
 
