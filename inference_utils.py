@@ -30,6 +30,10 @@ def run_img2img_inference(accelerator, args, vae, unet, text_encoder, dtype,
                                                               torch_dtype=dtype)
     pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config)
 
+    def dummy_checker(images, **kwargs):
+        return images, False
+
+    pipeline.safety_checker = dummy_checker
     init_images_w_names = load_images(init_images_dp, size=init_img_size)
 
     if not isinstance(prompts, (list, tuple)):
