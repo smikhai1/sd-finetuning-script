@@ -7,3 +7,4 @@ ftfy==6.1.1
 tensorboard==2.6.0
 modelcards
 diffusers==0.12.1
+gradio==3.19.1
