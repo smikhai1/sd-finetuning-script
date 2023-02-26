@@ -5,6 +5,8 @@ import gradio as gr
 import torch
 from PIL import Image
 
+pipe, pipe_i2i = None, None
+
 
 def parse_args():
     parser = ArgumentParser()
@@ -26,22 +28,23 @@ def error_str(error, title="Error"):
             {error}""" if error else ""
 
 
-def inference(pipe, pipe_i2i, prompt, guidance, steps, width=640, height=640, seed=0, img=None, strength=0.5, neg_prompt="",
+def inference(prompt, guidance, steps, width=640, height=640, seed=0, img=None, strength=0.5, neg_prompt="",
               auto_prefix=False, prefix=''):
     generator = torch.Generator('cuda').manual_seed(seed) if seed != 0 else None
     prompt = f"{prefix} {prompt}" if auto_prefix else prompt
 
     try:
         if img is not None:
-            return img_to_img(pipe_i2i, prompt, neg_prompt, img, strength, guidance, steps, width, height, generator), None
+            return img_to_img(prompt, neg_prompt, img, strength, guidance, steps, width, height, generator), None
         else:
-            return txt_to_img(pipe, prompt, neg_prompt, guidance, steps, width, height, generator), None
+            return txt_to_img(prompt, neg_prompt, guidance, steps, width, height, generator), None
     except Exception as e:
         return None, error_str(e)
 
 
-def txt_to_img(pipeline, prompt, neg_prompt, guidance, steps, width, height, generator):
-    result = pipeline(
+def txt_to_img(prompt, neg_prompt, guidance, steps, width, height, generator):
+    global pipe
+    result = pipe(
         prompt,
         negative_prompt=neg_prompt,
         num_inference_steps=int(steps),
@@ -53,10 +56,11 @@ def txt_to_img(pipeline, prompt, neg_prompt, guidance, steps, width, height, gen
     return result.images[0]
 
 
-def img_to_img(pipeline, prompt, neg_prompt, img, strength, guidance, steps, width, height, generator):
+def img_to_img(prompt, neg_prompt, img, strength, guidance, steps, width, height, generator):
+    global pipe_i2i
     ratio = min(height / img.height, width / img.width)
     img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
-    result = pipeline(
+    result = pipe_i2i(
         prompt,
         negative_prompt=neg_prompt,
         init_image=img,
@@ -69,6 +73,8 @@ def img_to_img(pipeline, prompt, neg_prompt, img, strength, guidance, steps, wid
 
 
 def main(args):
+    global pipe, pipe_i2i
+
     model_id = args.model_id
     access_token = args.access_token
     revision = args.revision
@@ -104,14 +110,9 @@ def main(args):
             f"""
                 <div class="main-div">
                   <div>
-                    <h1>22h Diffusion v0.1</h1>
+                    <h1>Custom SD models runner </h1>
                   </div>
-                  <p>
-                   Demo for <a href="https://huggingface.co/22h/vintedois-diffusion-v0-1">22h Diffusion v0-1</a> Stable Diffusion model.<br>
-                   {"Add the following tokens to your prompts for the model to work properly: <b>prefix</b>" if prefix else ""}
-                  </p>
                   Running on {"<b>GPU 🔥</b>" if torch.cuda.is_available() else f"<b>CPU 🥶</b>. For faster inference it is recommended to <b>upgrade to GPU in <a href='https://huggingface.co/spaces/22h/vintedois-diffusion-v0-1'>Settings</a></b>"}<br><br>
-                  <a style="display:inline-block" href="https://huggingface.co/spaces/22h/vintedois-diffusion-v0-1?duplicate=true"><img src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
                 </div>
             """
         )
@@ -149,9 +150,9 @@ def main(args):
                         strength = gr.Slider(label="Transformation strength", minimum=0, maximum=1, step=0.01, value=0.5)
 
         auto_prefix.change(lambda x: gr.update(placeholder=f"{prefix} [your prompt]" if x else "[Your prompt]"),
-                           inputs=auto_prefix, outputs=prompt, queue=False)
+                            inputs=auto_prefix, outputs=prompt, queue=False)
 
-        inputs = [pipe, pipe_i2i, prompt, guidance, steps, width, height, seed, image, strength, neg_prompt, auto_prefix]
+        inputs = [prompt, guidance, steps, width, height, seed, image, strength, neg_prompt, auto_prefix]
         outputs = [image_out, error_output]
         prompt.submit(inference, inputs=inputs, outputs=outputs)
         generate.click(inference, inputs=inputs, outputs=outputs)
@@ -164,7 +165,7 @@ def main(args):
         """)
 
     demo.queue(concurrency_count=1)
-    demo.launch()
+    demo.launch(share=True, debug=True)
 
 
 if __name__ == '__main__':
