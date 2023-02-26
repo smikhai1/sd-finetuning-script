@@ -1,6 +1,9 @@
 from argparse import ArgumentParser
+import os.path as osp
 
-from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, EulerAncestralDiscreteScheduler
+from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, EulerAncestralDiscreteScheduler, \
+                      UNet2DConditionModel
+from transformers import CLIPTextModel
 import gradio as gr
 import torch
 from PIL import Image
@@ -12,13 +15,15 @@ def parse_args():
     parser = ArgumentParser()
 
     parser.add_argument('--model_id', type=str, required=True,
-                        help='Model ID from HF Hub or local path to the model')
+                        help='Model ID from HF Hub or local path to the model\'s root dir')
     parser.add_argument('--access_token', type=str, required=True,
                         help='HF token')
     parser.add_argument('--prefix', type=str, default='',
                         help='Prompt prefix')
     parser.add_argument('--revision', type=str, default=None,
                         help='Revision of the model')
+    parser.add_argument('--ckpt_iter', type=int, default=None,
+                        help='Sets from which iteration to load the checkpoint')
 
     return parser.parse_args()
 
@@ -83,20 +88,45 @@ def main(args):
     scheduler = EulerAncestralDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler",
                                                                 use_auth_token=access_token, revision=revision)
 
-    pipe = StableDiffusionPipeline.from_pretrained(
-        model_id,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        scheduler=scheduler,
-        use_auth_token=access_token,
-        revision=revision)
+    if args.ckpt_iter is None:
+        pipe = StableDiffusionPipeline.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            scheduler=scheduler,
+            safety_checker=None,
+            use_auth_token=access_token,
+            revision=revision)
 
-    pipe_i2i = StableDiffusionImg2ImgPipeline.from_pretrained(
-        model_id,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        scheduler=scheduler,
-        use_auth_token=access_token,
-        revision=revision
-    )
+        pipe_i2i = StableDiffusionImg2ImgPipeline.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            scheduler=scheduler,
+            safety_checker=None,
+            use_auth_token=access_token,
+            revision=revision
+        )
+    else:
+        ckpt_dp = osp.join(args.model_id, f'checkpoint-{args.ckpt_iter}')
+
+        pipe = StableDiffusionPipeline.from_pretrained(
+            model_id,
+            unet=UNet2DConditionModel.from_pretrained(osp.join(ckpt_dp, 'unet'), torch_dtype=torch.float16),
+            text_encoder=CLIPTextModel.from_pretrained(osp.join(ckpt_dp, 'text_encoder'), torch_dtype=torch.float16),
+            torch_dtype=torch.float16,
+            safety_checker=None,
+            scheduler=scheduler,
+            use_auth_token=access_token,
+            revision=revision)
+
+        pipe_i2i = StableDiffusionImg2ImgPipeline.from_pretrained(
+            model_id,
+            unet=UNet2DConditionModel.from_pretrained(osp.join(ckpt_dp, 'unet'), torch_dtype=torch.float16),
+            text_encoder=CLIPTextModel.from_pretrained(osp.join(ckpt_dp, 'text_encoder'), torch_dtype=torch.float16),
+            torch_dtype=torch.float16,
+            safety_checker=None,
+            scheduler=scheduler,
+            use_auth_token=access_token,
+            revision=revision)
 
     if torch.cuda.is_available():
         pipe = pipe.to("cuda")
